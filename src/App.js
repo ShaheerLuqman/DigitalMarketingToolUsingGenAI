@@ -1,11 +1,10 @@
 import React from 'react';
-import ImageAdForm from './ImageAdForm';
+import ImageAdForm from './components/ImageAdForm';
 
 
 function App() {
   return (
     <div className="App">
-      <h1>Hello</h1>
       <ImageAdForm />
     </div>
   );
