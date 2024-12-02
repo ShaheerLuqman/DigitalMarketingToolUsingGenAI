@@ -3,6 +3,9 @@ from tkinter import filedialog
 from PIL import Image, ImageTk
 import os
 import shutil
+from rembg import remove
+import threading
+from tkinter import ttk
 
 class ProductApp:
     def __init__(self, root):
@@ -62,7 +65,7 @@ class ProductApp:
         self.page_indicator_frame = tk.Frame(self.root)
         self.page_indicator_frame.pack(side=tk.BOTTOM, pady=10)
         
-        self.page_label = tk.Label(self.page_indicator_frame, text="Page 1 of 2", font=("Helvetica", 12))
+        self.page_label = tk.Label(self.page_indicator_frame, text="Page 1 of 3", font=("Helvetica", 12))
         self.page_label.pack()
 
         # Bottom Button Frame for Back and Next buttons (move it above page indicator)
@@ -77,6 +80,12 @@ class ProductApp:
         self.next_button = tk.Button(self.bottom_frame, text="Next", font=("Helvetica", 14), state=tk.DISABLED, command=self.display_product_info)
         self.next_button.pack(side=tk.RIGHT, padx=20)
 
+        # Initialize additional variable for processed image
+        self.processed_image_path = None
+
+        # Initialize loading spinner (but don't pack it yet)
+        self.loading_spinner = ttk.Progressbar(self.display_frame, mode='indeterminate')
+        
     def upload_image(self):
         """Upload image file"""
         # Ask the user to select a new image
@@ -171,22 +180,90 @@ class ProductApp:
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 2 of 2")
+        self.page_label.config(text="Page 2 of 3")
+
+        # Enable Next button when moving to background removal page
+        self.next_button.config(state=tk.NORMAL, command=self.remove_background)
 
     def go_back(self):
-        """Go back to the input form"""
-        self.display_frame.pack_forget()
-        self.form_frame.pack(pady=10)
-        
-        # Change heading back to "Product Information"
-        self.title_label.config(text="Product Information")
+        """Go back to the previous page"""
+        if self.processed_image_path:  # If on page 3
+            self.processed_image_path = None
+            self.display_product_info()  # Go back to page 2
+        else:  # If on page 2
+            self.display_frame.pack_forget()
+            self.form_frame.pack(pady=10)
+            self.title_label.config(text="Product Information")
+            self.back_button.config(state=tk.DISABLED)
+            self.next_button.config(state=tk.NORMAL)
+            self.page_label.config(text="Page 1 of 3")
 
-        # Disable Back button and enable Next button on the first page
+    def remove_background(self):
+        """Display the product image with background removed"""
+        # Clear the display frame
+        for widget in self.display_frame.winfo_children():
+            widget.destroy()
+
+        # Change the heading text
+        self.title_label.config(text="Processing Image...")
+
+        # Show loading spinner
+        self.loading_spinner = ttk.Progressbar(self.display_frame, mode='indeterminate')
+        self.loading_spinner.pack(pady=20)
+        self.loading_spinner.start(10)  # Start the animation
+        
+        # Disable both buttons during processing
+        self.next_button.config(state=tk.DISABLED)
         self.back_button.config(state=tk.DISABLED)
-        self.next_button.config(state=tk.NORMAL)
+        
+        # Process in background thread
+        thread = threading.Thread(target=self._process_background_removal)
+        thread.start()
+        
+    def _process_background_removal(self):
+        """Process background removal in background thread"""
+        # Get the input image path and extension
+        input_name, input_ext = os.path.splitext(self.image_path)
+        if not input_ext:
+            input_ext = '.png'
+
+        # Create output path in temp directory
+        output_path = os.path.join('temp', 'product-nonbg.png')
+
+        # Remove background using rembg
+        input_img = Image.open(self.image_path)
+        output_img = remove(input_img, only_mask=False)
+        output_img.save(output_path)
+        
+        self.processed_image_path = output_path
+        
+        # Schedule UI update on main thread
+        self.root.after(0, self._finish_background_removal)
+        
+    def _finish_background_removal(self):
+        """Update UI after background removal is complete"""
+        # Remove loading spinner
+        self.loading_spinner.stop()
+        self.loading_spinner.pack_forget()
+        
+        # Change the heading text
+        self.title_label.config(text="Background Removed")
+
+        # Load and display the processed image
+        img = Image.open(self.processed_image_path)
+        img.thumbnail((700, 700))
+        img = ImageTk.PhotoImage(img)
+
+        self.img_label = tk.Label(self.display_frame, image=img)
+        self.img_label.image = img
+        self.img_label.pack(pady=20)
+
+        # Update button states
+        self.next_button.config(state=tk.DISABLED)
+        self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 1 of 2")
+        self.page_label.config(text="Page 3 of 3")
 
 if __name__ == "__main__":
     root = tk.Tk()
