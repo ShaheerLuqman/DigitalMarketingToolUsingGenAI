@@ -65,7 +65,7 @@ class ProductApp:
         self.page_indicator_frame = tk.Frame(self.root)
         self.page_indicator_frame.pack(side=tk.BOTTOM, pady=10)
         
-        self.page_label = tk.Label(self.page_indicator_frame, text="Page 1 of 3", font=("Helvetica", 12))
+        self.page_label = tk.Label(self.page_indicator_frame, text="Page 1 of 6", font=("Helvetica", 12))
         self.page_label.pack()
 
         # Bottom Button Frame for Back and Next buttons (move it above page indicator)
@@ -86,6 +86,13 @@ class ProductApp:
         # Initialize loading spinner (but don't pack it yet)
         self.loading_spinner = ttk.Progressbar(self.display_frame, mode='indeterminate')
         
+        # Initialize background image path
+        self.background_image_path = None
+
+        # Initialize slogan and caption variables
+        self.slogan = ""
+        self.caption = ""
+
     def upload_image(self):
         """Upload image file"""
         # Ask the user to select a new image
@@ -180,14 +187,77 @@ class ProductApp:
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 2 of 3")
+        self.page_label.config(text="Page 2 of 6")
 
         # Enable Next button when moving to background removal page
         self.next_button.config(state=tk.NORMAL, command=self.remove_background)
 
     def go_back(self):
         """Go back to the previous page"""
-        if self.processed_image_path:  # If on page 3
+        current_page = self.page_label.cget("text")
+        
+        if current_page == "Page 6 of 6":  # If on final post page
+            # Clear the display frame
+            for widget in self.display_frame.winfo_children():
+                widget.destroy()
+
+            # Change the heading text
+            self.title_label.config(text="Generate Text")
+
+            # Show the next button again
+            self.next_button.pack(side=tk.RIGHT, padx=20)
+            
+            # Create and show text generator page
+            self.show_text_generator()
+            
+            # Configure next button for final post
+            self.next_button.config(state=tk.NORMAL, command=self.show_final_post)
+            
+            # Update page indicator
+            self.page_label.config(text="Page 5 of 6")
+            
+        elif current_page == "Page 5 of 6":  # If on text generation page
+            if hasattr(self, 'slogan_text') and hasattr(self, 'caption_text'):
+                self.slogan = self.slogan_text.get("1.0", tk.END).strip()
+                self.caption = self.caption_text.get("1.0", tk.END).strip()
+            self.show_background_generator()
+            self.next_button.config(state=tk.NORMAL, command=self.show_text_generator)
+        elif self.background_image_path:  # If on page 4
+            # Clear the display frame
+            for widget in self.display_frame.winfo_children():
+                widget.destroy()
+            
+            # Change the heading text
+            self.title_label.config(text="Background Removed")
+
+            # Load and display the processed image
+            img = Image.open(self.processed_image_path)
+            img.thumbnail((700, 700))
+            img = ImageTk.PhotoImage(img)
+
+            # Create generate button
+            generate_button = tk.Button(
+                self.display_frame, 
+                text="Generate New Background", 
+                font=("Helvetica", 14),
+                command=self.generate_background
+            )
+            generate_button.pack(pady=20)
+
+            self.img_label = tk.Label(self.display_frame, image=img)
+            self.img_label.image = img
+            self.img_label.pack(pady=20)
+
+            # Update button states
+            self.next_button.config(state=tk.NORMAL, command=self.show_background_generator)
+            self.back_button.config(state=tk.NORMAL)
+
+            # Update page indicator
+            self.page_label.config(text="Page 3 of 6")
+            
+            # Reset background image path
+            self.background_image_path = None
+        elif self.processed_image_path:  # If on page 3
             self.processed_image_path = None
             self.display_product_info()  # Go back to page 2
         else:  # If on page 2
@@ -195,8 +265,8 @@ class ProductApp:
             self.form_frame.pack(pady=10)
             self.title_label.config(text="Product Information")
             self.back_button.config(state=tk.DISABLED)
-            self.next_button.config(state=tk.NORMAL)
-            self.page_label.config(text="Page 1 of 3")
+            self.next_button.config(state=tk.NORMAL, command=self.display_product_info)
+            self.page_label.config(text="Page 1 of 6")
 
     def remove_background(self):
         """Display the product image with background removed"""
@@ -233,8 +303,32 @@ class ProductApp:
         # Remove background using rembg
         input_img = Image.open(self.image_path)
         output_img = remove(input_img, only_mask=False)
-        output_img.save(output_path)
         
+        # Convert to RGBA if not already
+        output_img = output_img.convert("RGBA")
+        
+        # Find the bounding box of the non-transparent area
+        bbox = output_img.getbbox()
+        
+        if bbox:
+            # Crop the non-transparent area
+            output_img = output_img.crop(bbox)
+            
+            # Get original dimensions
+            original_width, original_height = output_img.size
+            
+            # Calculate scaling factor to maintain aspect ratio
+            scaling_factor = min(300 / original_width, 300 / original_height)
+            
+            # Calculate new dimensions
+            new_width = int(original_width * scaling_factor)
+            new_height = int(original_height * scaling_factor)
+            
+            # Resize the image
+            output_img = output_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Save the processed image
+        output_img.save(output_path, "PNG")
         self.processed_image_path = output_path
         
         # Schedule UI update on main thread
@@ -259,11 +353,199 @@ class ProductApp:
         self.img_label.pack(pady=20)
 
         # Update button states
+        self.next_button.config(state=tk.NORMAL, command=self.show_background_generator)
+        self.back_button.config(state=tk.NORMAL)
+
+        # Update page indicator
+        self.page_label.config(text="Page 3 of 6")
+
+    def show_background_generator(self):
+        """Show the background generation page"""
+        # Clear the display frame
+        for widget in self.display_frame.winfo_children():
+            widget.destroy()
+
+        # Change the heading text
+        self.title_label.config(text="Generate Background")
+
+        # Create generate button
+        generate_button = tk.Button(
+            self.display_frame, 
+            text="Generate New Background", 
+            font=("Helvetica", 14),
+            command=self.generate_background
+        )
+        generate_button.pack(pady=20)
+
+        # Show current background if exists
+        if self.background_image_path:
+            self.display_background_image()
+
+        # Update button states
         self.next_button.config(state=tk.DISABLED)
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 3 of 3")
+        self.page_label.config(text="Page 4 of 6")
+
+        # Update next button
+        self.next_button.config(state=tk.NORMAL, command=self.show_text_generator)
+
+    def generate_background(self):
+        """Generate and display background"""
+        # For now, just use the existing bg.png path
+        self.background_image_path = os.path.join("temp", "bg.png")
+        
+        # Clear previous images
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Label) and hasattr(widget, 'image'):
+                widget.destroy()
+        
+        # Display background image
+        if os.path.exists(self.background_image_path):
+            bg_img = Image.open(self.background_image_path)
+            bg_img.thumbnail((700, 700))
+            bg_photo = ImageTk.PhotoImage(bg_img)
+            
+            bg_label = tk.Label(self.display_frame, image=bg_photo)
+            bg_label.image = bg_photo
+            bg_label.pack(pady=20)
+
+    def display_background_image(self):
+        """Display the generated background image"""
+        if self.background_image_path and os.path.exists(self.background_image_path):
+            # Remove previous image if exists
+            for widget in self.display_frame.winfo_children():
+                if isinstance(widget, tk.Label) and hasattr(widget, 'image'):
+                    widget.destroy()
+
+            # Load and display the background image
+            img = Image.open(self.background_image_path)
+            img.thumbnail((700, 700))
+            img = ImageTk.PhotoImage(img)
+
+            bg_label = tk.Label(self.display_frame, image=img)
+            bg_label.image = img
+            bg_label.pack(pady=20)
+
+    def generate_slogan(self):
+        """Placeholder function to generate slogan"""
+        return "Amazing Product - Buy Now!"
+
+    def generate_caption(self):
+        """Placeholder function to generate caption"""
+        return "Experience the incredible features of our latest product. #amazing #product"
+
+    def show_text_generator(self):
+        """Show the text generation page"""
+        # Clear the display frame
+        for widget in self.display_frame.winfo_children():
+            widget.destroy()
+
+        # Change the heading text
+        self.title_label.config(text="Generate Text")
+
+        # Create frame for slogan section
+        slogan_frame = tk.Frame(self.display_frame)
+        slogan_frame.pack(pady=20, fill=tk.X, padx=20)
+
+        # Create slogan button and text box
+        generate_slogan_btn = tk.Button(
+            slogan_frame,
+            text="Generate Slogan",
+            font=("Helvetica", 14),
+            command=lambda: slogan_text.insert(1.0, self.generate_slogan())
+        )
+        generate_slogan_btn.pack(pady=(0, 10))
+
+        slogan_text = tk.Text(slogan_frame, height=3, width=50, font=("Helvetica", 12))
+        slogan_text.pack()
+        if self.slogan:
+            slogan_text.insert(1.0, self.slogan)
+
+        # Create frame for caption section
+        caption_frame = tk.Frame(self.display_frame)
+        caption_frame.pack(pady=20, fill=tk.X, padx=20)
+
+        # Create caption button and text box
+        generate_caption_btn = tk.Button(
+            caption_frame,
+            text="Generate Caption",
+            font=("Helvetica", 14),
+            command=lambda: caption_text.insert(1.0, self.generate_caption())
+        )
+        generate_caption_btn.pack(pady=(0, 10))
+
+        caption_text = tk.Text(caption_frame, height=5, width=50, font=("Helvetica", 12))
+        caption_text.pack()
+        if self.caption:
+            caption_text.insert(1.0, self.caption)
+
+        # Store text widgets references for accessing their content later
+        self.slogan_text = slogan_text
+        self.caption_text = caption_text
+
+        # Update button states
+        self.next_button.config(state=tk.NORMAL, command=self.show_final_post)
+        self.back_button.config(state=tk.NORMAL)
+
+        # Update page indicator
+        self.page_label.config(text="Page 5 of 6")
+
+    def generate_post(self):
+        """Placeholder function to generate final post"""
+        return os.path.join("temp", "output_image.svg")
+
+    def show_final_post(self):
+        """Show the final generated post"""
+        # Save the text content before moving to final page
+        if hasattr(self, 'slogan_text') and hasattr(self, 'caption_text'):
+            self.slogan = self.slogan_text.get("1.0", tk.END).strip()
+            self.caption = self.caption_text.get("1.0", tk.END).strip()
+
+        # Clear the display frame
+        for widget in self.display_frame.winfo_children():
+            widget.destroy()
+
+        # Change the heading text
+        self.title_label.config(text="Final Post")
+
+        # Display the post
+        self.display_post()
+
+        # Update button states
+        self.next_button.pack_forget()  # Remove the next button completely
+        self.back_button.config(state=tk.NORMAL)
+
+        # Update page indicator
+        self.page_label.config(text="Page 6 of 6")
+
+    def display_post(self):
+        """Display the generated post"""
+        # Get SVG path from generate function
+        svg_path = self.generate_post()
+        
+        if os.path.exists(svg_path):
+            # Convert SVG to PNG for display (since tkinter can't directly display SVG)
+            from cairosvg import svg2png
+            import io
+            
+            # Read SVG file
+            with open(svg_path, 'rb') as svg_file:
+                svg_data = svg_file.read()
+            
+            # Convert to PNG
+            png_data = svg2png(bytestring=svg_data)
+            
+            # Create PIL Image from PNG data
+            img = Image.open(io.BytesIO(png_data))
+            img.thumbnail((700, 700))
+            photo = ImageTk.PhotoImage(img)
+            
+            # Display the image
+            img_label = tk.Label(self.display_frame, image=photo)
+            img_label.image = photo
+            img_label.pack(pady=20)
 
 if __name__ == "__main__":
     root = tk.Tk()
