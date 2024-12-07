@@ -513,8 +513,10 @@ class ProductApp:
         # Display the post
         self.display_post()
 
-        # Update button states
-        self.next_button.pack_forget()  # Remove the next button completely
+        # Hide the next button
+        self.next_button.pack_forget()
+        
+        # Enable back button
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
