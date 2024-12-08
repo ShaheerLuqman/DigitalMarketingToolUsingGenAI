@@ -6,6 +6,7 @@ import shutil
 from rembg import remove
 import threading
 from tkinter import ttk
+from bg_generator import process_product_image
 
 class ProductApp:
     def __init__(self, root):
@@ -187,42 +188,37 @@ class ProductApp:
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 2 of 6")
+        self.update_page_number(2)
 
         # Enable Next button when moving to background removal page
         self.next_button.config(state=tk.NORMAL, command=self.remove_background)
 
     def go_back(self):
         """Go back to the previous page"""
-        current_page = self.page_label.cget("text")
+        current_page = int(self.page_label.cget("text").split()[1])
         
-        if current_page == "Page 6 of 6":  # If on final post page
+        if current_page == 6:  # If on final post page
             # Clear the display frame
             for widget in self.display_frame.winfo_children():
                 widget.destroy()
 
             # Change the heading text
             self.title_label.config(text="Generate Text")
-
-            # Show the next button again
-            self.next_button.pack(side=tk.RIGHT, padx=20)
             
             # Create and show text generator page
             self.show_text_generator()
             
-            # Configure next button for final post
-            self.next_button.config(state=tk.NORMAL, command=self.show_final_post)
-            
             # Update page indicator
-            self.page_label.config(text="Page 5 of 6")
+            self.update_page_number(5)
             
-        elif current_page == "Page 5 of 6":  # If on text generation page
+        elif current_page == 5:  # If on text generation page
             if hasattr(self, 'slogan_text') and hasattr(self, 'caption_text'):
                 self.slogan = self.slogan_text.get("1.0", tk.END).strip()
                 self.caption = self.caption_text.get("1.0", tk.END).strip()
             self.show_background_generator()
             self.next_button.config(state=tk.NORMAL, command=self.show_text_generator)
-        elif self.background_image_path:  # If on page 4
+            self.update_page_number(4)
+        elif current_page == 4:  # If on background generator page
             # Clear the display frame
             for widget in self.display_frame.winfo_children():
                 widget.destroy()
@@ -253,20 +249,21 @@ class ProductApp:
             self.back_button.config(state=tk.NORMAL)
 
             # Update page indicator
-            self.page_label.config(text="Page 3 of 6")
+            self.update_page_number(3)
             
             # Reset background image path
             self.background_image_path = None
-        elif self.processed_image_path:  # If on page 3
+        elif current_page == 3:  # If on background removal page
             self.processed_image_path = None
             self.display_product_info()  # Go back to page 2
+            self.update_page_number(2)
         else:  # If on page 2
             self.display_frame.pack_forget()
             self.form_frame.pack(pady=10)
             self.title_label.config(text="Product Information")
             self.back_button.config(state=tk.DISABLED)
             self.next_button.config(state=tk.NORMAL, command=self.display_product_info)
-            self.page_label.config(text="Page 1 of 6")
+            self.update_page_number(1)
 
     def remove_background(self):
         """Display the product image with background removed"""
@@ -357,7 +354,7 @@ class ProductApp:
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 3 of 6")
+        self.update_page_number(3)
 
     def show_background_generator(self):
         """Show the background generation page"""
@@ -377,31 +374,81 @@ class ProductApp:
         )
         generate_button.pack(pady=20)
 
-        # Show current background if exists
-        if self.background_image_path:
+        # Check for existing background in temp folder
+        temp_bg_path = os.path.join("temp", "bg.png")
+        if os.path.exists(temp_bg_path):
+            self.background_image_path = temp_bg_path
             self.display_background_image()
 
         # Update button states
-        self.next_button.config(state=tk.DISABLED)
+        self.next_button.config(state=tk.NORMAL)
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 4 of 6")
+        self.update_page_number(4)
 
         # Update next button
-        self.next_button.config(state=tk.NORMAL, command=self.show_text_generator)
+        self.next_button.config(command=self.show_text_generator)
 
     def generate_background(self):
         """Generate and display background"""
-        # For now, just use the existing bg.png path
-        self.background_image_path = os.path.join("temp", "bg.png")
-        
-        # Clear previous images
+        # Clear previous images except the generate button
         for widget in self.display_frame.winfo_children():
             if isinstance(widget, tk.Label) and hasattr(widget, 'image'):
                 widget.destroy()
         
-        # Display background image
+        # Show loading spinner
+        self.loading_spinner = ttk.Progressbar(self.display_frame, mode='indeterminate')
+        self.loading_spinner.pack(pady=20)
+        self.loading_spinner.start(10)
+        
+        # Disable buttons during processing
+        self.next_button.config(state=tk.DISABLED)
+        self.back_button.config(state=tk.DISABLED)
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.DISABLED)
+        
+        # Process in background thread
+        thread = threading.Thread(target=self._process_background_generation)
+        thread.start()
+
+    def _process_background_generation(self):
+        """Process background generation in background thread"""
+        try:
+            # Load the processed image
+            product_image = Image.open(self.processed_image_path)
+            
+            # Set output path
+            output_path = os.path.join("temp", "bg.png")
+            
+            # Generate background using bg_generator
+            process_product_image(product_image, output_path)
+            
+            # Store the background image path
+            self.background_image_path = output_path
+            
+            # Schedule UI update on main thread
+            self.root.after(0, self._finish_background_generation)
+        except Exception as e:
+            print(f"Error generating background: {e}")
+            # Schedule error handling on main thread
+            self.root.after(0, self._handle_background_generation_error)
+
+    def _finish_background_generation(self):
+        """Update UI after background generation is complete"""
+        # Remove loading spinner
+        self.loading_spinner.stop()
+        self.loading_spinner.pack_forget()
+        
+        # Re-enable buttons
+        self.next_button.config(state=tk.NORMAL)
+        self.back_button.config(state=tk.NORMAL)
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.NORMAL)
+        
+        # Display the generated background
         if os.path.exists(self.background_image_path):
             bg_img = Image.open(self.background_image_path)
             bg_img.thumbnail((700, 700))
@@ -410,6 +457,22 @@ class ProductApp:
             bg_label = tk.Label(self.display_frame, image=bg_photo)
             bg_label.image = bg_photo
             bg_label.pack(pady=20)
+
+    def _handle_background_generation_error(self):
+        """Handle errors in background generation"""
+        # Remove loading spinner
+        self.loading_spinner.stop()
+        self.loading_spinner.pack_forget()
+        
+        # Re-enable buttons
+        self.next_button.config(state=tk.NORMAL)
+        self.back_button.config(state=tk.NORMAL)
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.NORMAL)
+        
+        # Show error message
+        tk.messagebox.showerror("Error", "Failed to generate background. Please try again.")
 
     def display_background_image(self):
         """Display the generated background image"""
@@ -490,7 +553,7 @@ class ProductApp:
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 5 of 6")
+        self.update_page_number(5)
 
     def generate_post(self):
         """Placeholder function to generate final post"""
@@ -513,14 +576,12 @@ class ProductApp:
         # Display the post
         self.display_post()
 
-        # Hide the next button
-        self.next_button.pack_forget()
-        
-        # Enable back button
+        # Update button states
+        self.next_button.config(state=tk.DISABLED)  # Disable next since it's the last page
         self.back_button.config(state=tk.NORMAL)
 
         # Update page indicator
-        self.page_label.config(text="Page 6 of 6")
+        self.update_page_number(6)
 
     def display_post(self):
         """Display the generated post"""
@@ -528,26 +589,41 @@ class ProductApp:
         svg_path = self.generate_post()
         
         if os.path.exists(svg_path):
-            # Convert SVG to PNG for display (since tkinter can't directly display SVG)
-            from cairosvg import svg2png
-            import io
-            
-            # Read SVG file
-            with open(svg_path, 'rb') as svg_file:
-                svg_data = svg_file.read()
-            
-            # Convert to PNG
-            png_data = svg2png(bytestring=svg_data)
-            
-            # Create PIL Image from PNG data
-            img = Image.open(io.BytesIO(png_data))
-            img.thumbnail((700, 700))
-            photo = ImageTk.PhotoImage(img)
-            
-            # Display the image
-            img_label = tk.Label(self.display_frame, image=photo)
-            img_label.image = photo
-            img_label.pack(pady=20)
+            try:
+                # Convert SVG to PNG for display
+                from cairosvg import svg2png
+                import io
+                
+                # Read SVG file
+                with open(svg_path, 'rb') as svg_file:
+                    svg_data = svg_file.read()
+                
+                # Convert to PNG
+                png_data = svg2png(bytestring=svg_data)
+                
+                # Create PIL Image from PNG data
+                img = Image.open(io.BytesIO(png_data))
+                img.thumbnail((700, 700))
+                photo = ImageTk.PhotoImage(img)
+                
+                # Display the image
+                img_label = tk.Label(self.display_frame, image=photo)
+                img_label.image = photo
+                img_label.pack(pady=20)
+                
+            except Exception as e:
+                print(f"Error displaying post: {e}")
+                error_label = tk.Label(
+                    self.display_frame,
+                    text="Error displaying the post",
+                    font=("Helvetica", 14),
+                    fg="red"
+                )
+                error_label.pack(pady=20)
+
+    def update_page_number(self, page_number):
+        """Force update the page number"""
+        self.page_label.config(text=f"Page {page_number} of 6")
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -9,6 +9,8 @@ A simple desktop application built with Python and Tkinter that allows users to 
 - **Image Thumbnail Preview**: View thumbnails of uploaded images.
 - **Responsive Layout**: The app adjusts to different screen sizes.
 
+# https://github.com/timothybrooks/instruct-pix2pix
+
 ## Prerequisites
 Ensure the following prerequisites are installed on your system before running the app:
 - Python 3.10.11 
