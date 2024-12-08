@@ -7,6 +7,9 @@ from rembg import remove
 import threading
 from tkinter import ttk
 from bg_generator import process_product_image
+import google.generativeai as genai
+from dotenv import load_dotenv
+load_dotenv()
 
 class ProductApp:
     def __init__(self, root):
@@ -93,6 +96,21 @@ class ProductApp:
         # Initialize slogan and caption variables
         self.slogan = ""
         self.caption = ""
+
+        # Initialize Gemini
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        self.generation_config = {
+            "temperature": 1,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 8192,
+            "response_mime_type": "text/plain",
+        }
+        self.model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config=self.generation_config,
+        )
+        self.chat_session = None
 
     def upload_image(self):
         """Upload image file"""
@@ -492,8 +510,29 @@ class ProductApp:
             bg_label.pack(pady=20)
 
     def generate_slogan(self):
-        """Placeholder function to generate slogan"""
-        return "Amazing Product - Buy Now!"
+        """Generate slogan using Gemini AI"""
+        try:
+            if not self.chat_session:
+                # Upload the processed image
+                file = genai.upload_file(self.processed_image_path, mime_type="image/png")
+                
+                # Initialize chat session
+                self.chat_session = self.model.start_chat()
+                
+                # Send the first message and get response
+                response = self.chat_session.send_message([
+                    file,
+                    "Write a slogan of less than 4 words for the product. Slogan should be catchy and memorable. Return only one slogan and no punctuation marks."
+                ]).text
+            else:
+                # Get another slogan if chat session exists
+                response = self.chat_session.send_message("Give me another slogan").text
+            
+            return response
+                
+        except Exception as e:
+            print(f"Error generating slogan: {e}")
+            return "Error generating slogan"
 
     def generate_caption(self):
         """Placeholder function to generate caption"""
@@ -512,41 +551,43 @@ class ProductApp:
         slogan_frame = tk.Frame(self.display_frame)
         slogan_frame.pack(pady=20, fill=tk.X, padx=20)
 
+        # Create loading spinner for slogan (but don't pack it yet)
+        self.slogan_loading = ttk.Progressbar(slogan_frame, mode='indeterminate')
+
         # Create slogan button and text box
         generate_slogan_btn = tk.Button(
             slogan_frame,
             text="Generate Slogan",
             font=("Helvetica", 14),
-            command=lambda: slogan_text.insert(1.0, self.generate_slogan())
+            command=self.generate_slogan_with_loading
         )
         generate_slogan_btn.pack(pady=(0, 10))
 
-        slogan_text = tk.Text(slogan_frame, height=3, width=50, font=("Helvetica", 12))
-        slogan_text.pack()
+        # Create and store slogan text widget reference first
+        self.slogan_text = tk.Text(slogan_frame, height=3, width=50, font=("Helvetica", 12))
+        self.slogan_text.pack()
         if self.slogan:
-            slogan_text.insert(1.0, self.slogan)
+            self.slogan_text.insert(1.0, self.slogan)
 
         # Create frame for caption section
         caption_frame = tk.Frame(self.display_frame)
         caption_frame.pack(pady=20, fill=tk.X, padx=20)
+
+        # Create and store caption text widget reference first
+        self.caption_text = tk.Text(caption_frame, height=5, width=50, font=("Helvetica", 12))
+        self.caption_text.pack()
 
         # Create caption button and text box
         generate_caption_btn = tk.Button(
             caption_frame,
             text="Generate Caption",
             font=("Helvetica", 14),
-            command=lambda: caption_text.insert(1.0, self.generate_caption())
+            command=lambda: self.caption_text.insert(1.0, self.generate_caption())
         )
         generate_caption_btn.pack(pady=(0, 10))
 
-        caption_text = tk.Text(caption_frame, height=5, width=50, font=("Helvetica", 12))
-        caption_text.pack()
         if self.caption:
-            caption_text.insert(1.0, self.caption)
-
-        # Store text widgets references for accessing their content later
-        self.slogan_text = slogan_text
-        self.caption_text = caption_text
+            self.caption_text.insert(1.0, self.caption)
 
         # Update button states
         self.next_button.config(state=tk.NORMAL, command=self.show_final_post)
@@ -624,6 +665,61 @@ class ProductApp:
     def update_page_number(self, page_number):
         """Force update the page number"""
         self.page_label.config(text=f"Page {page_number} of 6")
+
+    def generate_slogan_with_loading(self):
+        """Generate slogan with loading animation"""
+        # Show loading spinner
+        self.slogan_loading.pack(pady=5)
+        self.slogan_loading.start(10)
+        
+        # Disable the generate button during processing
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.DISABLED)
+        
+        # Process in background thread
+        thread = threading.Thread(target=self._process_slogan_generation)
+        thread.start()
+
+    def _process_slogan_generation(self):
+        """Process slogan generation in background thread"""
+        try:
+            new_slogan = self.generate_slogan()
+            # Schedule UI update on main thread
+            self.root.after(0, self._finish_slogan_generation, new_slogan)
+        except Exception as e:
+            print(f"Error in slogan generation: {e}")
+            self.root.after(0, self._handle_slogan_generation_error)
+
+    def _finish_slogan_generation(self, new_slogan):
+        """Update UI after slogan generation is complete"""
+        # Remove loading spinner
+        self.slogan_loading.stop()
+        self.slogan_loading.pack_forget()
+        
+        # Re-enable buttons
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.NORMAL)
+        
+        # Update the text widget with new slogan
+        self.slogan_text.delete(1.0, tk.END)
+        self.slogan_text.insert(1.0, new_slogan)
+
+    def _handle_slogan_generation_error(self):
+        """Handle errors in slogan generation"""
+        # Remove loading spinner
+        self.slogan_loading.stop()
+        self.slogan_loading.pack_forget()
+        
+        # Re-enable buttons
+        for widget in self.display_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                widget.config(state=tk.NORMAL)
+        
+        # Show error message
+        self.slogan_text.delete(1.0, tk.END)
+        self.slogan_text.insert(1.0, "Error generating slogan. Please try again.")
 
 if __name__ == "__main__":
     root = tk.Tk()
