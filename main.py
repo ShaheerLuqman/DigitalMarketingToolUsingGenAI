@@ -7,14 +7,25 @@ from rembg import remove
 import threading
 from tkinter import ttk
 from bg_generator import process_product_image
-import google.generativeai as genai
 from dotenv import load_dotenv
+from finalPost import create_final_image, save_as_svg, save_as_png
+from datetime import datetime
+import warnings
+import webbrowser
+import google.generativeai as genai
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 load_dotenv()
 
 class ProductApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Product Info App")
+
+        # Initialize text_color
+        self.text_color = "white"  # Initialize text_color
 
         # Get screen dimensions
         screen_width = self.root.winfo_screenwidth()
@@ -23,7 +34,7 @@ class ProductApp:
         # Set window size and position it 100px below the top
         self.root.geometry(f"1600x900+{int((screen_width - 1600) / 2)}+50")
 
-        # Initialize variables
+        # Initialize other variables
         self.image_path = ""
         self.description = ""
         self.product_name = ""
@@ -97,6 +108,7 @@ class ProductApp:
         self.slogan = ""
         self.caption = ""
 
+    
         # Initialize Gemini
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.generation_config = {
@@ -441,8 +453,9 @@ class ProductApp:
             output_path = os.path.join("temp", "bg.png")
             
             # Generate background using bg_generator
-            process_product_image(product_image, output_path)
+            processed_image, text_color = process_product_image(product_image, output_path)
             
+            self.text_color = text_color
             # Store the background image path
             self.background_image_path = output_path
             
@@ -535,8 +548,38 @@ class ProductApp:
             return "Error generating slogan"
 
     def generate_caption(self):
-        """Placeholder function to generate caption"""
-        return "Experience the incredible features of our latest product. #amazing #product"
+        """Generate a caption using Gemini with loading animation"""
+        def task():
+            self.show_loading("Generating caption...")
+            try:
+                if not hasattr(self, 'chat_session') or self.chat_session is None:
+                    # Upload the image to Gemini
+                    file = genai.upload_file(self.processed_image_path, mime_type="image/png")
+                    
+                    # Initialize chat session
+                    self.chat_session = self.model.start_chat()
+                    
+                    if self.chat_session is None:
+                        raise ValueError("Failed to start chat session. Please check your model configuration.")
+                    
+                    # Send the first message and get response
+                    response = self.chat_session.send_message([
+                        file,
+                        f"Generate a caption for the product image. Product Name is {self.product_name} The caption should be descriptive and engaging. Caption should be of around 100 words. Include 3-4 Hashtags. Do not give options, just give one as output"
+                    ]).text
+                else:
+                    # Get another caption if chat session exists
+                    response = self.chat_session.send_message(f"Generate a caption for the product image. Product Name is {self.product_name} The caption should be descriptive and engaging. Caption should be of around 100 words. Include 3-4 Hashtags. Do not give options, just give one as output").text
+                
+                self.caption_text.insert(1.0, response)
+            except Exception as e:
+                print(f"Error generating caption: {e}")
+                self.caption_text.insert(1.0, "Error generating caption.")
+            finally:
+                self.hide_loading()
+
+        # Run the task in a separate thread to avoid blocking the UI
+        threading.Thread(target=task).start()
 
     def show_text_generator(self):
         """Show the text generation page"""
@@ -564,7 +607,7 @@ class ProductApp:
         generate_slogan_btn.pack(pady=(0, 10))
 
         # Create and store slogan text widget reference first
-        self.slogan_text = tk.Text(slogan_frame, height=3, width=50, font=("Helvetica", 12))
+        self.slogan_text = tk.Text(slogan_frame, height=3, width=70, font=("Helvetica", 12))
         self.slogan_text.pack()
         if self.slogan:
             self.slogan_text.insert(1.0, self.slogan)
@@ -574,7 +617,7 @@ class ProductApp:
         caption_frame.pack(pady=20, fill=tk.X, padx=20)
 
         # Create and store caption text widget reference first
-        self.caption_text = tk.Text(caption_frame, height=5, width=50, font=("Helvetica", 12))
+        self.caption_text = tk.Text(caption_frame, height=15, width=70, font=("Helvetica", 12))
         self.caption_text.pack()
 
         # Create caption button and text box
@@ -582,7 +625,7 @@ class ProductApp:
             caption_frame,
             text="Generate Caption",
             font=("Helvetica", 14),
-            command=lambda: self.caption_text.insert(1.0, self.generate_caption())
+            command=self.generate_caption
         )
         generate_caption_btn.pack(pady=(0, 10))
 
@@ -614,53 +657,144 @@ class ProductApp:
         # Change the heading text
         self.title_label.config(text="Final Post")
 
-        # Display the post
-        self.display_post()
+        # Create the final image and get the path
+        final_image_path = self.create_final_image(text_color="black")
+
+        # Load and display the final image
+        img = Image.open(final_image_path)
+        img.thumbnail((500, 500))  # Reduced size to 500x500
+        img = ImageTk.PhotoImage(img)
+
+        # Create a label to display the final image
+        final_img_label = tk.Label(self.display_frame, image=img)
+        final_img_label.image = img  # Keep a reference to avoid garbage collection
+        final_img_label.pack(pady=10)  # Adjusted padding
+
+        # Display the caption below the final image
+        caption_label = tk.Label(self.display_frame, text=self.caption, font=("Helvetica", 12), wraplength=1200, anchor='n', justify='left')
+        caption_label.pack(pady=(10, 20))  # Adjusted padding for top and bottom
+
+        # Rename Next Button to Finish
+        self.next_button.config(text="Finish", command=self.finish_app)
+        self.next_button.pack(pady=20)
+
+        # Create a frame to hold the buttons
+        button_frame = tk.Frame(self.display_frame)
+        button_frame.pack(pady=10)
+
+        # Create Save SVG Button with fixed size
+        save_svg_button = tk.Button(button_frame, text="Save SVG", font=("Helvetica", 14), command=self.save_svg, width=20)
+        save_svg_button.pack(side=tk.LEFT, padx=5)  # Add padding to the left
+
+        # Create Open Boxy SVG Button
+        open_boxy_svg_button = tk.Button(button_frame, text="Edit Your File", font=("Helvetica", 14), command=self.open_boxy_svg, width=20)
+        open_boxy_svg_button.pack(side=tk.LEFT, padx=5)  # Add padding to the left
 
         # Update button states
-        self.next_button.config(state=tk.DISABLED)  # Disable next since it's the last page
-        self.back_button.config(state=tk.NORMAL)
+        self.back_button.config(state=tk.NORMAL)  # Keep back button enabled
 
         # Update page indicator
         self.update_page_number(6)
 
-    def display_post(self):
-        """Display the generated post"""
-        # Get SVG path from generate function
-        svg_path = self.generate_post()
-        
-        if os.path.exists(svg_path):
+    def save_svg(self):
+        """Save the SVG file to a new location"""
+        # Ask the user for a file path to save the SVG
+        svg_output_path = filedialog.asksaveasfilename(defaultextension=".svg",
+                                                        filetypes=[("SVG files", "*.svg"),
+                                                                   ("All files", "*.*")])
+        if svg_output_path:
             try:
-                # Convert SVG to PNG for display
-                from cairosvg import svg2png
-                import io
-                
-                # Read SVG file
-                with open(svg_path, 'rb') as svg_file:
-                    svg_data = svg_file.read()
-                
-                # Convert to PNG
-                png_data = svg2png(bytestring=svg_data)
-                
-                # Create PIL Image from PNG data
-                img = Image.open(io.BytesIO(png_data))
-                img.thumbnail((700, 700))
-                photo = ImageTk.PhotoImage(img)
-                
-                # Display the image
-                img_label = tk.Label(self.display_frame, image=photo)
-                img_label.image = photo
-                img_label.pack(pady=20)
-                
+                # Call the save_as_svg function with the selected path
+                background_path = './temp/bg.png'
+                product_path = './temp/product-nonbg.png'
+                # Save the SVG using the existing function
+                save_as_svg(Image.open(background_path), Image.open(product_path), self.slogan, svg_output_path)
+                tk.messagebox.showinfo("Success", f"SVG saved successfully at: {svg_output_path}")
             except Exception as e:
-                print(f"Error displaying post: {e}")
-                error_label = tk.Label(
-                    self.display_frame,
-                    text="Error displaying the post",
-                    font=("Helvetica", 14),
-                    fg="red"
-                )
-                error_label.pack(pady=20)
+                tk.messagebox.showerror("Error", f"Failed to save SVG: {e}")
+
+    def open_boxy_svg(self):
+        """Open Boxy SVG in the default web browser"""
+        webbrowser.open("https://boxy-svg.com/")
+
+    def finish_app(self):
+        """Close the application, copy temp folder contents to future_dataset, and save product details to a text file."""
+        # Define the source and destination paths
+        temp_folder = './temp'
+        future_dataset_folder = './future_dataset'
+        
+        # Create a new folder name based on the current date and time
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        new_folder_path = os.path.join(future_dataset_folder, current_time)
+
+        # Create the new folder if it doesn't exist
+        os.makedirs(new_folder_path, exist_ok=True)
+
+        # Copy contents from temp folder to the new folder
+        try:
+            for item in os.listdir(temp_folder):
+                s = os.path.join(temp_folder, item)
+                d = os.path.join(new_folder_path, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d, False, None)  # Copy directory
+                else:
+                    shutil.copy2(s, d)  # Copy file
+            tk.messagebox.showinfo("Success", f"Files copied to: {new_folder_path}")
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to copy files: {e}")
+
+        # Save product details to a text file
+        details_file_path = os.path.join(new_folder_path, "product_details.txt")
+        try:
+            with open(details_file_path, 'w') as f:
+                f.write(f"Product Name: {self.product_name}\n")
+                f.write(f"Product Description: {self.description}\n")
+                f.write(f"Slogan Generated: {self.slogan}\n")
+                f.write(f"Caption Generated: {self.caption}\n")
+            tk.messagebox.showinfo("Success", f"Product details saved to: {details_file_path}")
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to save product details: {e}")
+
+        self.root.destroy()  # Close the Tkinter window
+
+    def create_final_image(self, text_color="white"):  # Set default to white
+        """Create and display the final image"""
+        # Load images from the temp folder
+        background_path = './temp/bg.png'
+        product_path = './temp/product-nonbg.png'
+        final_image_path = './temp/final_image.png'  # Path to save the final image
+        svg_output_path = './temp/final_image.svg'  # Path to save the SVG file
+
+        # Use self.text_color if it's set, otherwise default to white
+        if self.text_color is None:
+            text_color = "white"
+        else:
+            text_color = self.text_color
+        
+        # Print the text color being used
+        print(f"Text color being used: {text_color}")
+
+        try:
+            # Load the background and product images
+            background_image = Image.open(background_path)
+            product_image = Image.open(product_path)
+
+            # Create the final image
+            final_image = create_final_image(background_image, product_image, self.slogan, text_color)
+
+            # Save the final image as PNG
+            final_image.save(final_image_path, format="PNG")
+            print(f"Final image created and saved as '{final_image_path}'.")
+
+            # Save the final image as a layered SVG
+            save_as_svg(background_image, product_image, self.slogan, svg_output_path)
+            print(f"SVG file created and saved as '{svg_output_path}'.")
+
+            return final_image_path  # Return the path of the saved image
+
+        except Exception as e:
+            print(f"Error processing images: {e}")
+            return None  # Return None in case of error
 
     def update_page_number(self, page_number):
         """Force update the page number"""
@@ -720,6 +854,16 @@ class ProductApp:
         # Show error message
         self.slogan_text.delete(1.0, tk.END)
         self.slogan_text.insert(1.0, "Error generating slogan. Please try again.")
+
+    def show_loading(self, message="Loading..."):
+        """Display a loading message"""
+        self.loading_label = ttk.Label(self.root, text=message, font=("Helvetica", 12))
+        self.loading_label.pack(pady=10)
+
+    def hide_loading(self):
+        """Hide the loading message"""
+        if hasattr(self, 'loading_label'):
+            self.loading_label.pack_forget()
 
 if __name__ == "__main__":
     root = tk.Tk()

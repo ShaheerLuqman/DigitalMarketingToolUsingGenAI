@@ -11,8 +11,57 @@ import os
 import random
 import shutil
 import io
+import google.generativeai as genai
 
-warnings.filterwarnings('ignore')
+# Suppress specific warning
+warnings.filterwarnings(
+    "ignore",
+    message="You have disabled the safety checker",
+    category=UserWarning
+)
+
+# Initialize Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+def get_contrasting_color(color_names):
+    """Ask Gemini for a contrasting color to the list of color names provided."""
+    colors = []
+    # Create the model
+    generation_config = {
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+        "response_mime_type": "text/plain",
+    }
+
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config=generation_config,
+    )
+    chat_session = model.start_chat(
+        history=[
+            {
+                "role": "user",
+                "parts": [
+                    f"I have product with {color_names} color. No description please Just give me name of 1 basic combine color for the whole list."
+                ],
+            },
+        ]
+    )
+    
+    response = chat_session.send_message("INSERT_INPUT_HERE")
+    color = response.text.strip()  # Ensure this is a string
+    
+    comp_response = chat_session.send_message(f"What color complements {color}? Give a single name.")
+    color += ", " + comp_response.text.strip()
+    colors.append(color)  # Append the complementary color
+
+    # Ask for text color
+    text_color_response = chat_session.send_message(f"What color of Text black or white will suit on {color}? Give a single name.")
+    colors.append(text_color_response.text.strip())  # Append the text color
+
+    return colors  # Return both contrasting and complementary colors
 
 def get_palette(image):
     """Modified to accept PIL Image object instead of path"""
@@ -116,19 +165,21 @@ def get_random_background():
     
     return used_path
 
-def process_product_image(product_image: Image.Image, output_path: str = None) -> Image.Image:
-    """Modified to accept PIL Image object and optionally return PIL Image"""
+def process_product_image(product_image: Image.Image, output_path: str = None) -> tuple[Image.Image, str]:
+    """Modified to accept PIL Image object and optionally return PIL Image and text color"""
     # Extract colors from the product image
     color_names = extract_colors(product_image)
+    color_names = (",").join(color_names)
     
     # Print extracted colors
-    print("\nExtracted colors from product:")
-    for i, color in enumerate(color_names, 1):
-        print(f"{i}. {color}")
+    print(color_names)
+    # Get suggested background color from Gemini
+    suggested_color = get_contrasting_color(color_names)
     
-    # Create prompt using extracted colors
-    prompt = f"Recolor using dark {color_names[0].rsplit(' ', 1)[-1]}, white and black"
-    print(f"\nGenerated prompt: {prompt}\n")
+    # Create prompt using extracted colors and suggested background color
+    prompt = f"Recolor the image to shades of {suggested_color[0]}, keeping textures and details intact."
+    text_color = suggested_color[1]  # Store the text color
+    print(text_color)
     
     # Get random background image
     background_image_path = get_random_background()
@@ -145,11 +196,11 @@ def process_product_image(product_image: Image.Image, output_path: str = None) -
         processed_image.save(output_path)
         print(f"✓ Processed image saved as: {output_path}")
     
-    return processed_image
+    return processed_image, text_color  # Return both processed image and text color
 
 if __name__ == "__main__":
     # Load product image as PIL object
-    product_image_path = './temp/product-nonbg.png'
+    product_image_path = './temp/temp.jpg'
     output_path = './temp/bg.png'
     
     try:
@@ -157,7 +208,7 @@ if __name__ == "__main__":
         product_image = Image.open(product_image_path)
         
         # Process the image and get the result
-        processed_image = process_product_image(product_image, output_path)
+        processed_image, text_color = process_product_image(product_image, output_path)
         
         # Display the result (optional)
         processed_image.show()
