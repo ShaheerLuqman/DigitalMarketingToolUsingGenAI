@@ -1,5 +1,6 @@
 /venv
 /future_dataset
 /pd_dataset
+/bg_dataset
 /__pycache__
 .env

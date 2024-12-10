@@ -6,7 +6,7 @@ import shutil
 from rembg import remove
 import threading
 from tkinter import ttk
-from bg_generator import process_product_image
+from bg_generator import generate_bg_model_1, generate_bg_model_2
 from dotenv import load_dotenv
 from finalPost import create_final_image, save_as_svg, save_as_png
 from datetime import datetime
@@ -395,6 +395,14 @@ class ProductApp:
         # Change the heading text
         self.title_label.config(text="Generate Background")
 
+        # Create a dropdown menu for model selection
+        model_label = tk.Label(self.display_frame, text="Select Background Generation Model:", font=("Helvetica", 14))
+        model_label.pack(pady=(10, 0))
+
+        self.model_selection = ttk.Combobox(self.display_frame, values=["ip2p", "OABG"], state="readonly")
+        self.model_selection.current(0)  # Set default selection to "ip2p"
+        self.model_selection.pack(pady=(0, 20))
+
         # Create generate button
         generate_button = tk.Button(
             self.display_frame, 
@@ -451,9 +459,17 @@ class ProductApp:
             
             # Set output path
             output_path = os.path.join("temp", "bg.png")
+
+            selected_model = self.model_selection.get()
             
-            # Generate background using bg_generator
-            processed_image, text_color = process_product_image(product_image, output_path)
+            # Check which model to use based on the button pressed
+            if selected_model == "ip2p":
+                # Generate background using bg_generator model 1
+                processed_image, text_color = generate_bg_model_1(product_image, output_path)
+            elif selected_model == "OABG":
+                # Generate background using bg_generator model 2
+                processed_image, text_color = generate_bg_model_2(product_image, output_path)
+
             
             self.text_color = text_color
             # Store the background image path

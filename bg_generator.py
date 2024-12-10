@@ -1,17 +1,12 @@
 from PIL import Image, ImageOps
 import pandas as pd
 import numpy as np
-import colorsys
 from sklearn.cluster import KMeans
-from colory.color import Color
-import torch
-from diffusers import StableDiffusionInstructPix2PixPipeline
-import warnings
-import os
-import random
-import shutil
-import io
 import google.generativeai as genai
+from colory.color import Color
+import colorsys, torch, warnings, os, random, shutil
+from diffusers import StableDiffusionInstructPix2PixPipeline, DiffusionPipeline
+
 
 # Suppress specific warning
 warnings.filterwarnings(
@@ -165,7 +160,7 @@ def get_random_background():
     
     return used_path
 
-def process_product_image(product_image: Image.Image, output_path: str = None) -> tuple[Image.Image, str]:
+def generate_bg_model_1(product_image: Image.Image, output_path: str = None) -> tuple[Image.Image, str]:
     """Modified to accept PIL Image object and optionally return PIL Image and text color"""
     # Extract colors from the product image
     color_names = extract_colors(product_image)
@@ -198,6 +193,50 @@ def process_product_image(product_image: Image.Image, output_path: str = None) -
     
     return processed_image, text_color  # Return both processed image and text color
 
+
+def generate_bg_model_2(product_image: Image.Image, output_path: str = None) -> tuple[Image.Image, str]:
+    # Load pre-trained model pipeline
+    model_id = "yahoo-inc/photo-background-generation"
+    pipeline = DiffusionPipeline.from_pretrained(model_id, custom_pipeline=model_id)
+    pipeline = pipeline.to('cuda')
+
+    # Helper function to resize the image with padding
+    def resize_with_padding(img, expected_size):
+        img.thumbnail((expected_size[0], expected_size[1]))
+        delta_width = expected_size[0] - img.size[0]
+        delta_height = expected_size[1] - img.size[1]
+        pad_width = delta_width // 2
+        pad_height = delta_height // 2
+        padding = (pad_width, pad_height, delta_width - pad_width, delta_height - pad_height)
+        return ImageOps.expand(img, padding)
+
+    # Resize input image
+    img = resize_with_padding(product_image, (512, 512))
+
+    # Generate mask
+    mask = ImageOps.invert(img.convert("L"))  # Example: create a mask based on brightness
+
+    # Set up random seed generator
+    generator = torch.Generator(device='cuda').manual_seed(13)
+
+    # Generate image
+    with torch.autocast("cuda"):
+        output = pipeline(
+            prompt='Abstract professional',
+            image=img,
+            mask_image=mask,
+            control_image=mask,
+            num_images_per_prompt=1,
+            generator=generator,
+            num_inference_steps=20,
+            guess_mode=False,
+            controlnet_conditioning_scale=1.0
+        )
+
+    # Return the resulting image
+    output.images[0].save(output_path)
+    return output.images[0], "White"
+
 if __name__ == "__main__":
     # Load product image as PIL object
     product_image_path = './temp/temp.jpg'
@@ -208,12 +247,12 @@ if __name__ == "__main__":
         product_image = Image.open(product_image_path)
         
         # Process the image and get the result
-        processed_image, text_color = process_product_image(product_image, output_path)
+        processed_image, text_color = generate_bg_model_1(product_image, output_path)
         
         # Display the result (optional)
         processed_image.show()
         
-        print("Processing completed successfully!")
+        print("Processing completed successfully!") 
         
     except Exception as e:
         print(f"Error processing image: {e}")
