@@ -6,6 +6,7 @@ import google.generativeai as genai
 from colory.color import Color
 import colorsys, torch, warnings, os, random, shutil
 from diffusers import StableDiffusionInstructPix2PixPipeline, DiffusionPipeline
+from transparent_background import Remover
 
 
 # Suppress specific warning
@@ -212,17 +213,43 @@ def generate_bg_model_2(product_image: Image.Image, output_path: str = None) -> 
 
     # Resize input image
     img = resize_with_padding(product_image, (512, 512))
+    img = img.convert("RGB")
 
     # Generate mask
-    mask = ImageOps.invert(img.convert("L"))  # Example: create a mask based on brightness
+    mask = ImageOps.invert(Remover(mode='base').process(img, type='map'))
 
     # Set up random seed generator
     generator = torch.Generator(device='cuda').manual_seed(13)
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config={
+            "temperature": 1,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 8192,
+            "response_mime_type": "text/plain"
+            },
+    )
+    file = genai.upload_file("temp/product-nonbg.png", mime_type="image/png")
+    chat_session = model.start_chat(
+        history=[
+            {
+                "role": "user",
+                "parts": [
+                    file,
+                    f"I want to generate background for this product. Write a 1 line description of 10 words max for how the background for this product look like. Just give me one description and no options. Make the description simple but suiting the product"
+                ],
+            },
+        ]
+    )
+    
+    response = chat_session.send_message("INSERT_INPUT_HERE")
+    prompt = response.text.strip()
 
     # Generate image
     with torch.autocast("cuda"):
         output = pipeline(
-            prompt='Abstract professional',
+            prompt=prompt,
             image=img,
             mask_image=mask,
             control_image=mask,

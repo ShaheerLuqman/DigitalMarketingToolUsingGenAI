@@ -555,7 +555,7 @@ class ProductApp:
                 ]).text
             else:
                 # Get another slogan if chat session exists
-                response = self.chat_session.send_message("Give me another slogan").text
+                response = self.chat_session.send_message("Write a slogan of less than 4 words for the product. Slogan should be catchy and memorable. Return only one slogan and no punctuation marks.").text
             
             return response
                 
